@@ -27,12 +27,6 @@
       </div>
     </div>
 
-    <div id="rotate-overlay">
-      <div class="phone"></div>
-      <div class="title">Поверните телефон</div>
-      <div class="hint" id="rotate-hint"></div>
-    </div>
-
     <script>
       var canvas = document.querySelector("#unity-canvas");
 
@@ -56,20 +50,20 @@
       }
 
       // ---------- Landscape on phones ----------
-      // Android (Chrome, Yandex, Samsung...): on a tap we go fullscreen and lock
-      // the screen to landscape, so the phone turns the picture by itself.
-      // iPhone Safari does not allow sites to lock orientation, so there we show
-      // a "rotate your phone" screen until the phone is held sideways.
+      // 1. Android: on the first tap we go fullscreen and lock the screen to
+      //    landscape (works even with the system rotation lock on).
+      // 2. Whenever the screen is still portrait (iPhone, or the lock failed),
+      //    the whole page is turned 90° with CSS, so the game is shown sideways
+      //    and the phone itself does not need to rotate.
+      // Unity does not know about the CSS turn, so while it is on we
+      //   - report the canvas size as landscape (otherwise the picture stretches),
+      //   - turn touch/mouse coordinates back before Unity reads them.
       var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
         (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1); // iPadOS
       var root = document.documentElement;
       var requestFs = root.requestFullscreen || root.webkitRequestFullscreen;
       var canLock = !!(requestFs && window.screen && screen.orientation && screen.orientation.lock);
-      var overlay = document.querySelector("#rotate-overlay");
-
-      if (canLock) {
-        document.querySelector("#rotate-hint").textContent = "или просто нажмите на экран";
-      }
+      var rotated = false;
 
       function isFullscreen() {
         return !!(document.fullscreenElement || document.webkitFullscreenElement);
@@ -80,17 +74,64 @@
         var fs = isFullscreen() ? Promise.resolve() : Promise.resolve(requestFs.call(root));
         fs.then(function() {
           return screen.orientation.lock("landscape");
-        }).catch(function() { /* browser refused: the overlay still asks to rotate */ });
+        }).catch(function() { /* not allowed: the CSS turn keeps working */ });
+      }
+
+      function updateRotation() {
+        var w = window.innerWidth, h = window.innerHeight;
+        var shouldRotate = h > w;
+        root.style.setProperty("--screen-w", w + "px");
+        root.style.setProperty("--screen-h", h + "px");
+        if (shouldRotate !== rotated) {
+          rotated = shouldRotate;
+          root.classList.toggle("rotated", rotated);
+        }
       }
 
       if (isMobile) {
-        // The overlay itself is shown/hidden by CSS (orientation media query in style.css).
-        root.classList.add("is-mobile");
+        updateRotation();
+        window.addEventListener("resize", updateRotation);
+        window.addEventListener("orientationchange", function() { setTimeout(updateRotation, 100); });
+        setInterval(updateRotation, 500); // some browsers miss resize events after rotating
 
-        // Tap on the "rotate" screen -> try to turn automatically.
-        overlay.addEventListener("click", goLandscape);
+        // Canvas size as Unity should see it: its own (unturned) layout box.
+        var originalRect = canvas.getBoundingClientRect.bind(canvas);
+        canvas.getBoundingClientRect = function() {
+          if (!rotated) return originalRect();
+          var w = canvas.clientWidth, h = canvas.clientHeight;
+          return { left: 0, top: 0, right: w, bottom: h, x: 0, y: 0, width: w, height: h };
+        };
 
-        // First tap anywhere in the game -> fullscreen + landscape.
+        // Turn pointer coordinates back: the page is rotated 90° clockwise,
+        // so the game's x runs down the screen and its y runs right-to-left.
+        var fixed = new WeakSet();
+        function unrotate(p) {
+          if (!p || fixed.has(p)) return;
+          fixed.add(p);
+          var sx = p.clientX, sy = p.clientY;
+          var x = sy, y = window.innerWidth - sx;
+          Object.defineProperty(p, "clientX", { value: x });
+          Object.defineProperty(p, "clientY", { value: y });
+          Object.defineProperty(p, "pageX", { value: x });
+          Object.defineProperty(p, "pageY", { value: y });
+        }
+        function unrotateEvent(e) {
+          if (!rotated) return;
+          if (e.changedTouches) {
+            [e.touches, e.changedTouches, e.targetTouches].forEach(function(list) {
+              if (list) for (var i = 0; i < list.length; i++) unrotate(list[i]);
+            });
+          } else {
+            unrotate(e);
+          }
+        }
+        ["touchstart", "touchmove", "touchend", "touchcancel",
+         "mousedown", "mousemove", "mouseup", "click", "wheel",
+         "pointerdown", "pointermove", "pointerup", "pointercancel"].forEach(function(type) {
+          window.addEventListener(type, unrotateEvent, { capture: true, passive: true });
+        });
+
+        // First tap anywhere -> fullscreen + real landscape (Android).
         var firstTap = function() {
           document.removeEventListener("touchend", firstTap, true);
           if (!isFullscreen()) goLandscape();
