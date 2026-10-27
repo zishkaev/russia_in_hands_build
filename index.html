@@ -1,164 +1,148 @@
 <!DOCTYPE html>
-<html lang="en-us">
-	<head>
-		<meta charset="utf-8">
-			<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-				<title>Unity Web Player | Russia in hands</title>
-				<link rel="shortcut icon" href="TemplateData/favicon.ico">
-					<link rel="stylesheet" href="TemplateData/style.css">
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Russia in hands</title>
+    <link rel="shortcut icon" href="TemplateData/favicon.ico">
+    <link rel="stylesheet" href="TemplateData/style.css">
+  </head>
+  <body>
+    <div id="unity-container" class="unity-desktop">
+      <canvas id="unity-canvas" width=1280 height=768 tabindex="-1"></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-logo"></div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"> </div>
+      <div id="unity-footer">
+        <div id="unity-logo-title-footer"></div>
+        <div id="unity-fullscreen-button"></div>
+        <div id="unity-build-title">Russia in hands</div>
+      </div>
+    </div>
 
-						<!-- ============================================================ -->
-						<!-- ДОБАВЛЕНО: CSS для принудительного поворота в портретном режиме -->
-						<!-- ============================================================ -->
-						<style>
-							/* Отключаем прокрутку и резиновый отскок на мобильных */
-							html, body {
-							margin: 0;
-							padding: 0;
-							overflow: hidden;
-							overscroll-behavior: none;
-							background: #000;
-							}
+    <div id="rotate-overlay">
+      <div class="phone"></div>
+      <div class="title">Поверните телефон</div>
+      <div class="hint" id="rotate-hint"></div>
+    </div>
 
-							/* Когда на <html> есть класс force-landscape, и экран вертикальный — */
-      /* поворачиваем всё тело страницы на 90 градусов.                    */
-      @media screen and (orientation: portrait) {
-        html.force-landscape body {
-          position: fixed;
-          width: 100vh !important;
-          height: 100vw !important;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%) rotate(90deg);
-          transform-origin: center center;
-          overflow: hidden;
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+
+      function unityShowBanner(msg, type) {
+        var warningBanner = document.querySelector("#unity-warning");
+        function updateBannerVisibility() {
+          warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
         }
-
-        html.force-landscape #unity-container {
-          width: 100vh !important;
-          height: 100vw !important;
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
+        var div = document.createElement('div');
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+        if (type == 'error') div.style = 'background: red; padding: 10px;';
+        else {
+          if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+          setTimeout(function() {
+            warningBanner.removeChild(div);
+            updateBannerVisibility();
+          }, 5000);
         }
-
-        html.force-landscape #unity-canvas {
-          width: 100vh !important;
-          height: 100vw !important;
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-        }
-
-        /* Скрываем футер с кнопкой полного экрана, чтобы не мешал */
-        html.force-landscape #unity-footer {
-          display: none !important;
-        }
-      }
-    </style>
-					</head>
-	<body>
-		<div id="unity-container" class="unity-desktop">
-			<canvas id="unity-canvas" width="1280" height="768" tabindex="-1"></canvas>
-			<div id="unity-loading-bar">
-				<div id="unity-logo"></div>
-				<div id="unity-progress-bar-empty">
-					<div id="unity-progress-bar-full"></div>
-				</div>
-			</div>
-			<div id="unity-warning"> </div>
-			<div id="unity-footer">
-				<div id="unity-logo-title-footer"></div>
-				<div id="unity-fullscreen-button"></div>
-				<div id="unity-build-title">Russia in hands</div>
-			</div>
-		</div>
-
-		<!-- ============================================================ -->
-		<!-- ДОБАВЛЕНО: JS-функции для вызова из Unity                     -->
-		<!-- ============================================================ -->
-		<script>
-			// Эта функция вызывается из Unity (через [DllImport("__Internal")])
-			// Она добавляет класс force-landscape к <html>, и CSS выше
-      // автоматически поворачивает страницу.
-      function ForceLandscapeJS() {
-        document.documentElement.classList.add('force-landscape');
-        console.log('[Orientation] Force landscape ON');
+        updateBannerVisibility();
       }
 
-      // На случай, если понадобится вернуть портретный режим
-      function ReleaseLandscapeJS() {
-        document.documentElement.classList.remove('force-landscape');
-        console.log('[Orientation] Force landscape OFF');
+      // ---------- Landscape on phones ----------
+      // Android (Chrome, Yandex, Samsung...): on a tap we go fullscreen and lock
+      // the screen to landscape, so the phone turns the picture by itself.
+      // iPhone Safari does not allow sites to lock orientation, so there we show
+      // a "rotate your phone" screen until the phone is held sideways.
+      var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+        (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1); // iPadOS
+      var root = document.documentElement;
+      var requestFs = root.requestFullscreen || root.webkitRequestFullscreen;
+      var canLock = !!(requestFs && window.screen && screen.orientation && screen.orientation.lock);
+      var overlay = document.querySelector("#rotate-overlay");
+
+      if (canLock) {
+        document.querySelector("#rotate-hint").textContent = "или просто нажмите на экран";
       }
+
+      function isFullscreen() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+      }
+
+      function goLandscape() {
+        if (!canLock) return;
+        var fs = isFullscreen() ? Promise.resolve() : Promise.resolve(requestFs.call(root));
+        fs.then(function() {
+          return screen.orientation.lock("landscape");
+        }).catch(function() { /* browser refused: the overlay still asks to rotate */ });
+      }
+
+      if (isMobile) {
+        // The overlay itself is shown/hidden by CSS (orientation media query in style.css).
+        root.classList.add("is-mobile");
+
+        // Tap on the "rotate" screen -> try to turn automatically.
+        overlay.addEventListener("click", goLandscape);
+
+        // First tap anywhere in the game -> fullscreen + landscape.
+        var firstTap = function() {
+          document.removeEventListener("touchend", firstTap, true);
+          if (!isFullscreen()) goLandscape();
+        };
+        document.addEventListener("touchend", firstTap, true);
+      }
+      // ------------------------------------------
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/russia_in_hands_build.loader.js";
+      var config = {
+        arguments: [],
+        dataUrl: buildUrl + "/russia_in_hands_build.data",
+        frameworkUrl: buildUrl + "/russia_in_hands_build.framework.js",
+        codeUrl: buildUrl + "/russia_in_hands_build.wasm",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "DefaultCompany",
+        productName: "Russia in hands",
+        productVersion: "1.0",
+        showBanner: unityShowBanner,
+      };
+
+      if (isMobile) {
+        // Mobile: the game canvas fills the whole screen.
+        document.querySelector("#unity-container").className = "unity-mobile";
+        canvas.className = "unity-mobile";
+
+
+      } else {
+        // Desktop: game in a window that can be maximized to fullscreen.
+        canvas.style.width = "1280px";
+        canvas.style.height = "768px";
+      }
+
+      document.querySelector("#unity-loading-bar").style.display = "block";
+
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = () => {
+        createUnityInstance(canvas, config, (progress) => {
+          document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
+        }).then((unityInstance) => {
+          document.querySelector("#unity-loading-bar").style.display = "none";
+          document.querySelector("#unity-fullscreen-button").onclick = () => {
+            unityInstance.SetFullscreen(1);
+          };
+        }).catch((message) => {
+          alert(message);
+        });
+      };
+
+      document.body.appendChild(script);
     </script>
-
-		<script>
-			var canvas = document.querySelector("#unity-canvas");
-
-			function unityShowBanner(msg, type) {
-			var warningBanner = document.querySelector("#unity-warning");
-			function updateBannerVisibility() {
-			warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
-			}
-			var div = document.createElement('div');
-			div.innerHTML = msg;
-			warningBanner.appendChild(div);
-			if (type == 'error') div.style = 'background: red; padding: 10px;';
-			else {
-			if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
-			setTimeout(function() {
-			warningBanner.removeChild(div);
-			updateBannerVisibility();
-			}, 5000);
-			}
-			updateBannerVisibility();
-			}
-
-			var buildUrl = "Build";
-			var loaderUrl = buildUrl + "/russia_in_hands_build.loader.js";
-			var config = {
-			arguments: [],
-			dataUrl: buildUrl + "/russia_in_hands_build.data",
-			frameworkUrl: buildUrl + "/russia_in_hands_build.framework.js",
-			codeUrl: buildUrl + "/russia_in_hands_build.wasm",
-			streamingAssetsUrl: "StreamingAssets",
-			companyName: "DefaultCompany",
-			productName: "Russia in hands",
-			productVersion: "1.0",
-			showBanner: unityShowBanner,
-			};
-
-			if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-			var meta = document.createElement('meta');
-			meta.name = 'viewport';
-			meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-			document.getElementsByTagName('head')[0].appendChild(meta);
-			document.querySelector("#unity-container").className = "unity-mobile";
-			canvas.className = "unity-mobile";
-			} else {
-			canvas.style.width = "1280px";
-			canvas.style.height = "768px";
-			}
-
-			document.querySelector("#unity-loading-bar").style.display = "block";
-
-			var script = document.createElement("script");
-			script.src = loaderUrl;
-			script.onload = () => {
-			createUnityInstance(canvas, config, (progress) => {
-			document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
-			}).then((unityInstance) => {
-			document.querySelector("#unity-loading-bar").style.display = "none";
-			document.querySelector("#unity-fullscreen-button").onclick = () => {
-			unityInstance.SetFullscreen(1);
-			};
-			}).catch((message) => {
-			alert(message);
-			});
-			};
-
-			document.body.appendChild(script);
-		</script>
-	</body>
+  </body>
 </html>
